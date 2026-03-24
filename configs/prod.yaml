@@ -1,0 +1,9 @@
+project:
+  environment: prod
+
+logging:
+  level: INFO
+  structured: true
+
+pipeline:
+  sample_mode: false

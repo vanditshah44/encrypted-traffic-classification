@@ -1,286 +1,228 @@
-# Benign TLS 1.3 Dataset Generator (Thesis Project)
+# TLS Dataset
 
-_Automated benign traffic generator for TLS 1.3 network research_
+Privacy-preserving encrypted traffic analytics platform for TLS 1.3 and QUIC.
 
-This project is part of my **M.Sc. Cyber Security** thesis focusing on **attack detection in encrypted TLS 1.3 traffic**.  
-The goal of this tool is to generate **realistic benign TLS traffic**, capture it as `.pcap` files, and store rich metadata for later feature extraction and machine-learning–based detection.
+This repository is being upgraded from a thesis prototype into a production-oriented software project. The original research assets remain in place for reference, while all new implementation work will move into a clean package structure under `src/`.
 
-The script automates a real Firefox browser using Selenium (with your own Firefox profile and logins) and simultaneously captures all traffic via `tcpdump`. Each browsing session is labeled per site/category and stored with JSON metadata.
+## Current Status
 
----
+- `src/` contains the new application package that will replace one-off scripts over time.
+- `tests/` contains the automated test suite for the new codebase.
+- `configs/` contains environment-specific configuration files.
+- `artifacts/` is the home for generated models, reports, metrics, and temporary outputs.
+- The thesis PDF and existing root-level scripts are preserved as legacy inputs and evidence.
 
-## ✨ Features
-
-- **Automated Firefox browsing** using Selenium + GeckoDriver
-- **Uses a COPY of your real Firefox profile**  
-  → keeps logins, cookies, settings, but protects the original profile
-- **Human-like behaviour**:
-  - random delays
-  - scrolling behaviour
-  - random query selection (for Google)
-  - random link selection on result pages
-- **Traffic capture with tcpdump**:
-  - interface configurable (e.g. `ens18`, `eth0`, `enp0s3`)
-  - full packets (`-s 0`), no DNS resolution (`-n`)
-- **Per-site sessions**:
-  - configurable session duration (default: 30 minutes per site)
-  - curated list of popular sites in different categories:
-    - search, video, social, news, tech, shopping, music, etc.
-- **Metadata for each capture** (JSON):
-  - site name, category, label
-  - start/end times (UTC)
-  - duration
-  - pcap filename
-  - error information if something fails
-- **Telegram integration** (optional):
-  - sends start/finish/fatal error notifications to a Telegram chat
-- **Filesystem layout**:
-  - `tls_dataset/pcaps` – raw pcaps
-  - `tls_dataset/meta` – JSON metadata
-
----
-
-## 🧱 Project Structure
-
-The core logic is in a single script:
-
-- `main.py` – orchestrates:
-  - starting tcpdump
-  - launching Firefox
-  - simulating browsing behaviour for each site
-  - capturing and labeling traffic
-  - writing metadata
-  - sending Telegram notifications
-
-Configurable values (tokens, interface, profile, etc.) are read from:
-
-- `config.py` (user-created, not committed)
-
----
-
-## ⚙️ Requirements
-
-### System
-
-- Linux environment (e.g. Ubuntu in VM / Proxmox guest)
-- `tcpdump` installed and `sudo` rights to run it
-- Firefox browser installed
-- Python 3.8+ recommended
-
-
-
----
-
-## 🔐 Configuration
-
-Create a `config.py` next to `main.py` with your own values:
-
-```python
-# config.py (example)
-
-# Telegram bot (optional; leave empty if you don’t want notifications)
-tgBOT = ""      # e.g. "1234567890:ABCDEF..."
-chatID = ""     # e.g. your chat ID as string
-
-# Path to your real Firefox profile (with logins/cookies)
-# To find it, open Firefox → about:support → "Profile Directory"
-profilePath = "/home/youruser/.mozilla/firefox/abcd1234.default-release"
-```
-
-
----
-
-## 🌐 Firefox Profile Handling
-
-The script:
-
-1. Reads `FIREFOX_PROFILE_PATH` from `config.profilePath`.
-2. Copies that entire profile into a **temporary directory** each run:
-   - by default under `$TMPDIR/selenium-firefox-profile`
-3. Launches Firefox with:
-   - `-profile <copied_profile_path>`
-4. Applies some TLS/DoH preferences:
-   - `security.tls.version.min = 4`
-   - `security.tls.version.max = 4`
-   - `network.trr.mode = 3`
-   - `network.trr.uri = https://mozilla.cloudflare-dns.com/dns-query`
-   - `network.trr.custom.uri = https://mozilla.cloudflare-dns.com/dns-query`
-
-This approach gives you:
-
-- realistic traffic using **your actual accounts/sessions**
-- safety against corrupting your real profile
-- no “profile in use” lock issues
-
----
-
-## 🧪 Supported Sites & Behaviours
-
-Each site has its own handler function with simple but realistic behaviour:
-
-- **Search**
-  - `google`  
-    - random queries from a curated list  
-    - search, scroll results, click non-Google links, sometimes go back
-
-- **Video**
-  - `youtube`  
-    - open homepage, click random videos, scroll, return to homepage
-
-- **Social**
-  - `instagram`, `twitter (x.com)`, `facebook`, `reddit`, `linkedin`  
-    - open feed/home, scroll for a while with pauses
-
-- **Shopping**
-  - `amazon`, `ebay`  
-    - random product queries, search, scroll product listings
-
-- **News / Info**
-  - `cnn`, `bbc`, `wikipedia`  
-    - scroll pages; on Wikipedia, search random topics and read articles
-
-- **Music**
-  - `spotify`  
-    - open, scroll UI to simulate browsing
-
-- **Dev / Tech**
-  - `stackoverflow`, `github`  
-    - open questions/trending repos, scroll lists
-
-Each site has a `browse_<site>()` function and is registered in `SITE_CONFIGS`.
-
----
-
-## ▶️ Running the Script
-
-1. Make sure `tcpdump` is installed:
-
-```bash
-sudo apt install tcpdump
-```
-
-2. Ensure your capture interface is correct in `main.py`:
-
-```python
-CAPTURE_IFACE = "ens18"  # change to eth0, enp0s3, etc. if needed
-```
-
-3. Optionally, set a temporary directory for the Firefox profile copy:
-
-```bash
-export TMPDIR="$HOME/firefox-tmp"
-```
-
-4. Run:
-
-```bash
-TMPDIR="$HOME/firefox-tmp" python3 main.py
-```
-
-The script will:
-
-- iterate over all entries in `SITE_CONFIGS`
-- for each site:
-  - start `tcpdump`
-  - open Firefox with your (copied) profile
-  - run that site’s browsing behaviour for `SESSION_DURATION_SEC` (default 30 min)
-  - stop the capture
-  - write metadata JSON
-  - send Telegram notifications (if configured)
-
----
-
-## 📂 Output Layout
-
-By default, data is stored under `~/tls_dataset`:
+## Repository Layout
 
 ```text
-tls_dataset/
-├── pcaps/
-│   ├── search_google_20250101T120000Z.pcap
-│   ├── video_youtube_20250101T123000Z.pcap
-│   └── ...
-└── meta/
-    ├── search_google_20250101T120000Z.json
-    ├── video_youtube_20250101T123000Z.json
-    └── ...
+.
+├── Thesis/
+├── artifacts/
+├── configs/
+├── docker/
+├── src/
+│   └── tls_dataset/
+├── tests/
+├── Dockerfile
+├── docker-compose.yaml
+├── pyproject.toml
+└── requirements.lock
 ```
 
-Sample metadata file:
+## Quick Start
 
-```json
-{
-  "site": "google",
-  "category": "search",
-  "label": "search_google",
-  "start_utc": "2025-01-01T12:00:00Z",
-  "end_utc": "2025-01-01T12:30:05Z",
-  "duration_sec": 1800,
-  "pcap_file": "search_google_20250101T120000Z.pcap",
-  "error": null
-}
+1. Create a virtual environment with Python 3.12.
+2. Install the pinned dependencies from `requirements.lock`.
+3. Install the package in editable mode with `pip install -e .`.
+4. Run `python -m tls_dataset info` to confirm the scaffold is wired correctly.
+
+## Pipeline Usage
+
+The repository now provides one parameterized pipeline package for both benign and malicious datasets.
+
+- High-level run: `python -m tls_dataset run-dataset-pipeline ...`
+- Step-by-step modules live under `src/tls_dataset/pipeline/`
+- Legacy root scripts are now thin wrappers around the package modules, not separate implementations
+
+Example orchestration flow:
+
+```bash
+PYTHONPATH=src python3 -m tls_dataset run-dataset-pipeline \
+  --dataset-name benign \
+  --output-dir artifacts/runs/benign_local \
+  --pcap data/raw/benign_filtered.pcap \
+  --zeek-log-dir data/zeek/benign \
+  --extract-nfstream \
+  --convert-zeek
 ```
 
----
+This gives benign and malicious datasets the same execution path with different inputs instead of different scripts.
 
-## 🔭 Future Work
+By default, the orchestration command now runs data-quality gates before feature generation and fails fast on:
 
-Some ideas for extending and improving this project:
+- truncated PCAPs
+- missing required Zeek outputs
+- duplicate NFStream flow keys
+- poor NFStream to Zeek join rates
+- unmatched UIDs
+- non-TLS/QUIC leakage in merged outputs
 
-- **Richer per-site behaviour**
-  - Simulate logins / account interactions (messages, comments, likes) where ethically and legally allowed
-  - Follow internal links, browse multiple pages per session
-  - Add device/OS variations via user-agents
+Each run writes a JSON quality report into the chosen output directory.
 
-- **Traffic diversity**
-  - Add more websites (banking portals, cloud dashboards, dev platforms)
-  - Vary connection settings (e.g. different DNS resolvers, proxies, VPNs)
+## Malicious Pipeline
 
-- **Labeling & ML pipeline**
-  - Convert pcaps to flow-based CSV/Parquet using tools like Zeek/TShark
-  - Extract TLS-level features (JA3/JA4, SNI, cipher suites, packet timings)
-  - Train supervised/unsupervised models for benign vs. malicious detection
-  - Integrate with Jupyter notebooks for exploratory data analysis
+The repository also includes a malicious-capture preparation path that:
 
-- **Automation & orchestration**
-  - Dockerize the environment
-  - Integrate with Proxmox APIs to spin up dedicated capture VMs
-  - Add scheduling / cron-based long-running data collection
+- copies the raw sample into a managed run directory
+- sanitizes truncated or malformed captures with `editcap`
+- filters encrypted traffic consistently with `tshark`
+- records provenance for the raw, sanitized, and filtered artifacts
+- can extract NFStream immediately, and can run the full Zeek + NFStream pipeline on hosts where Zeek is installed
+- auto-detects Zeek from `PATH`, `ZEEK_BIN`, or common install paths like `/opt/zeek/bin/zeek`
+- runs Zeek and NFStream on the sanitized full capture so protocol analyzers keep full session context; the filtered PCAP is retained as an inspection artifact
 
-- **Robustness**
-  - Better retry logic on site failures / timeouts
-  - Fine-grained logging and metrics (e.g. Prometheus/Grafana integration)
+Example:
 
----
+```bash
+.venv/bin/python -m tls_dataset run-malicious-pipeline \
+  --dataset-name malicious_ready \
+  --input-pcap BotnetCapture/malicious_filtered.pcap \
+  --output-dir artifacts/runs/malicious_ready \
+  --manifest-csv BotnetCapture/manifest.csv \
+  --prepare-only \
+  --extract-nfstream-after-prepare
+```
 
-## ⚖️ Ethics & Responsible Use
+## Canonical Dataset
 
-This tool is intended **strictly for research and educational purposes**:
+The repository now supports a single canonical labeled dataset layer for training and reporting workflows.
 
-- generating benign TLS traffic for academic work
-- building datasets for intrusion detection & anomaly detection
-- studying encrypted traffic patterns
+- `configs/canonical_sources.yaml` declares the trusted source inputs
+- `python -m tls_dataset build-canonical-dataset ...` materializes the unified CSV
+- each row gets stable metadata such as `label`, `attack_family`, `capture_id`, `protocol_family`, `window_id`, and `source_dataset`
+- time windows are built from flow start timestamps, so the same dataset can drive both model training and timeline analytics
+- source-level labels can be extended through `extra_labels` in the config without changing code
 
-Users are responsible for:
+Example:
 
-- complying with the Terms of Service of visited websites
-- respecting legal and ethical constraints
-- not using this tool for abusive, malicious, or unauthorized traffic generation
+```bash
+.venv/bin/python -m tls_dataset build-canonical-dataset \
+  --config configs/canonical_sources.yaml \
+  --output-csv artifacts/canonical/canonical_labeled_flows.csv \
+  --output-summary-json artifacts/canonical/canonical_labeled_flows_summary.json
+```
 
----
+## ML Workflow
 
-## 📎 Thesis Context
+The repository now includes a full supervised ML workflow for the thesis model family:
 
-This project is part of my ongoing work on:
+- trains `GaussianNB`, `RandomForestClassifier`, and `GradientBoostingClassifier`
+- uses a stratified train/test split plus stratified cross-validation
+- saves fold metrics, holdout metrics, confusion matrices, ROC curves, PR curves, threshold sweeps, predictions, and feature importance
+- writes model comparison artifacts so reporting and evidence workflows can use the same outputs
 
-> **“Attack Detection in Encrypted TLS 1.3 ”**
+Example:
 
-It demonstrates:
+```bash
+.venv/bin/python -m tls_dataset run-ml-workflow \
+  --config configs/ml_workflow.yaml
+```
 
-- practical skills in network security
-- Python automation
-- browser instrumentation
-- dataset engineering
-- lab setup for encrypted traffic analysis
+## Multi-Tier Detection
 
-Feel free to reach out if you’re interested in the research or potential collaboration.
+The repository now supports a multi-tier detection pass on top of the trained models:
+
+- Tier 1 uses a lightweight filter to cheaply narrow the candidate set
+- Tier 2 runs deeper model inference on those candidates and produces a consensus suspiciousness score
+- Tier 3 builds a suspicious endpoint graph and enriches flows with cluster, node, and window-level context
+
+Example:
+
+```bash
+.venv/bin/python -m tls_dataset run-multi-tier \
+  --config configs/multi_tier_workflow.yaml
+```
+
+Saved outputs include:
+
+- `tiered_flow_scores.csv`
+- `tier1_candidates.csv`
+- `suspicious_flows.csv`
+- `graph_nodes.csv`
+- `graph_edges.csv`
+- `suspicious_clusters.csv`
+- `cluster_window_summary.csv`
+- `stage_metrics.json`
+- `workflow_summary.json`
+
+## Backend Platform
+
+The repository now includes a backend scoring platform instead of only offline workflows.
+
+Backend capabilities:
+
+- `FastAPI` API for health, model-bundle discovery, PCAP submission, and job tracking
+- `Postgres`-compatible metadata layer for batches, jobs, and artifact references
+- local or S3-compatible object storage for uploaded inputs and produced outputs
+- `Redis + RQ` worker queue for asynchronous PCAP scoring
+- worker-driven PCAP processing that reuses the standardized pipeline and multi-tier scoring logic
+
+Main implementation:
+
+- `src/tls_dataset/backend/app.py`
+- `src/tls_dataset/backend/worker.py`
+- `src/tls_dataset/backend/scoring.py`
+- `configs/backend.env.example`
+
+The Compose stack now includes:
+
+- `api`
+- `worker`
+- `postgres`
+- `redis`
+- `minio`
+
+Local backend verification in this sandbox is test-based. The code and tests passed, but binding a live HTTP port was blocked by the sandboxed execution environment here.
+
+## Project Direction
+
+The implementation roadmap is intentionally stronger than the written thesis:
+
+- fully reproducible data pipelines
+- malicious and benign dataset parity
+- model training and evaluation with saved evidence
+- production packaging, observability, and deployment support
+
+## Official Extraction Stack
+
+The production feature-extraction stack for this repository is:
+
+- `Zeek` for protocol-aware TLS 1.3 and QUIC metadata, connection logs, and protocol evidence
+- `NFStream` for flow statistics, bidirectional timing, packet-size distributions, and SPLT-style features
+
+`CICFlowMeter` is explicitly treated as thesis-era legacy only. It may still be referenced in the written document, but it is not part of the forward production path for this codebase.
+
+Why this decision was made:
+
+- the current scripts already align much more closely with Zeek + NFStream
+- Zeek provides richer TLS/QUIC visibility than the current prototype would get from CICFlowMeter alone
+- NFStream covers the flow-statistics role without introducing a parallel JVM-based extraction track
+- one official stack prevents reproducibility drift between research claims and production implementation
+
+The formal decision record lives in `docs/adr/0001-feature-extraction-stack.md`.
+
+## Documentation
+
+The implementation journey and findings are now documented in:
+
+- `docs/README.md`
+- `docs/backend-platform.md`
+- `docs/project-journey.md`
+- `docs/findings-register.md`
+- `docs/artifact-index.md`
+
+## Notes
+
+- Large PCAPs, generated CSVs, and local artifacts are ignored by git on purpose.
+- Docker assets are included as source files even though the local Docker CLI is not installed in this environment.
+- The repository now standardizes on Zeek + NFStream as the production extraction direction.

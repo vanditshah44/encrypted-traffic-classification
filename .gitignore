@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# Editors and OS metadata
+.idea/
+.vscode/
+.DS_Store
+
+# Environment files
+.env
+.env.*
+
+# Local artifacts and future data directories
+data/
+showcase/
+artifacts/**
+!artifacts/**/
+!artifacts/**/.gitkeep
+!artifacts/README.md
+
+# Thesis-era generated assets
+BotnetCapture/
+benign_filtered.pcap
+benign_process_csv/
+freezeData/
+zeek-out-benign/
+*.pcap
+*.pcapng
+*.cap
+
+# Logs
+*.log

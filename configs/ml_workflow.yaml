@@ -1,0 +1,34 @@
+version: 1
+
+dataset_csv: artifacts/canonical/canonical_labeled_flows.csv
+output_dir: artifacts/ml_workflow/latest
+target_column: label_id
+label_column: label
+record_id_column: record_id
+positive_label: 1
+test_size: 0.2
+random_state: 42
+cv_folds: 5
+threshold_metric: f1
+top_k_feature_importance: 20
+extra_excluded_columns:
+  - collection_origin
+  - environment
+
+permutation_importance:
+  n_repeats: 5
+  scoring: roc_auc
+  max_samples: 4000
+
+models:
+  gaussian_nb: {}
+  random_forest:
+    n_estimators: 300
+    random_state: 42
+    n_jobs: -1
+    class_weight: balanced_subsample
+  gradient_boosting:
+    n_estimators: 200
+    learning_rate: 0.05
+    max_depth: 3
+    random_state: 42

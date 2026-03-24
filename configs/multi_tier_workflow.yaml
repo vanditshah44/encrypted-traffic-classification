@@ -1,0 +1,31 @@
+version: 1
+
+dataset_csv: artifacts/canonical/canonical_labeled_flows.csv
+model_bundle_dir: artifacts/ml_workflow/latest
+output_dir: artifacts/multi_tier/latest
+
+target_column: label_id
+label_column: label
+record_id_column: record_id
+src_ip_column: src_ip
+dst_ip_column: dst_ip
+src_port_column: src_port
+dst_port_column: dst_port
+capture_id_column: capture_id
+window_id_column: window_id
+protocol_family_column: protocol_family
+requested_server_name_column: requested_server_name
+
+tier1_model_name: gaussian_nb
+tier1_threshold: null
+deep_model_names:
+  - random_forest
+  - gradient_boosting
+deep_model_weights:
+  random_forest: 1.0
+  gradient_boosting: 1.0
+deep_consensus_threshold: 0.5
+min_deep_model_passes: 2
+use_optimized_thresholds: true
+
+cluster_min_suspicious_flows: 1

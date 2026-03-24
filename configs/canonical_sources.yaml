@@ -1,0 +1,33 @@
+version: 1
+window_size_ms: 60000
+
+sources:
+  - name: benign_lab_nfstream
+    input_csv: benign_process_csv/benign_nfstream.csv
+    source_dataset: hdbw_lab_benign
+    capture_id: benign_filtered_primary
+    label: benign
+    attack_family: benign
+    attack_category: none
+    traffic_role: user_activity
+    feature_view: nfstream
+    encrypted_only: true
+    extra_labels:
+      environment: lab
+      collection_origin: thesis_workspace
+
+  - name: malicious_ctu_nfstream
+    input_csv: artifacts/runs/malicious_full_v2/malicious_full_v2_nfstream.csv
+    source_dataset: ctu_botnet_tls_filtered
+    capture_id: malicious_ready_primary
+    label: malicious
+    attack_family: botnet
+    attack_category: c2_exfil
+    traffic_role: adversarial_activity
+    feature_view: nfstream
+    encrypted_only: true
+    quality_report_json: artifacts/runs/malicious_full_v2/malicious_full_v2_quality_report.json
+    provenance_json: artifacts/runs/malicious_full_v2/malicious_full_v2_provenance.json
+    extra_labels:
+      environment: public_dataset
+      collection_origin: ctu_botnet

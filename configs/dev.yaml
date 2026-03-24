@@ -1,0 +1,9 @@
+project:
+  environment: dev
+
+logging:
+  level: DEBUG
+  structured: false
+
+pipeline:
+  sample_mode: true

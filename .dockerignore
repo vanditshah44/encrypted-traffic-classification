@@ -1,0 +1,17 @@
+.git
+.gitignore
+.venv
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+artifacts
+BotnetCapture
+benign_process_csv
+freezeData
+zeek-out-benign
+Thesis
+*.pcap
+*.pcapng
+*.cap
+*.log

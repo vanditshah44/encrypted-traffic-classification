@@ -79,6 +79,7 @@ class MultiTierConfig:
     min_deep_model_passes: int
     use_optimized_thresholds: bool
     cluster_min_suspicious_flows: int
+    test_capture_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,7 @@ def load_multitier_config(config_path: str | Path) -> MultiTierConfig:
         min_deep_model_passes=int(payload.get("min_deep_model_passes", 1)),
         use_optimized_thresholds=bool(payload.get("use_optimized_thresholds", True)),
         cluster_min_suspicious_flows=int(payload.get("cluster_min_suspicious_flows", 1)),
+        test_capture_ids=tuple(str(v) for v in payload.get("test_capture_ids", [])),
     )
 
 
@@ -423,6 +425,15 @@ def run_multitier_detection(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(dataset_path, low_memory=False)
+
+    if config.test_capture_ids and "capture_id" in df.columns:
+        original_rows = len(df)
+        df = df[df["capture_id"].isin(config.test_capture_ids)].reset_index(drop=True)
+        held_out = dict(df.groupby("capture_id").size())
+        print(f"INFO: multi-tier evaluating on held-out captures only: {held_out} ({len(df)}/{original_rows} rows)")
+        if df.empty:
+            raise RuntimeError(f"test_capture_ids {config.test_capture_ids!r} matched no rows in dataset")
+
     feature_columns = load_feature_columns(model_bundle_dir)
     X = align_inference_frame(df, feature_columns)
 

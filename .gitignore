@@ -32,6 +32,10 @@ artifacts/**
 !artifacts/**/.gitkeep
 !artifacts/README.md
 
+# Archived / out-of-scope material (kept locally, not published)
+archive/
+encclassi/
+
 # Thesis-era generated assets
 BotnetCapture/
 benign_filtered.pcap

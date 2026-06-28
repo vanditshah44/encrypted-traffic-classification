@@ -98,6 +98,52 @@ def build_parser() -> argparse.ArgumentParser:
     ml_parser.add_argument("--dataset-csv", default=None, help="Optional override for the canonical dataset CSV")
     ml_parser.add_argument("--output-dir", default=None, help="Optional override for the ML output directory")
 
+    loco_parser = subparsers.add_parser(
+        "run-loco-evaluation",
+        help="Run leave-one-capture-out and paired capture generalization evaluation.",
+    )
+    loco_parser.add_argument("--config", required=True, help="YAML config describing the ML workflow")
+    loco_parser.add_argument("--output-dir", default="artifacts/ml_workflow/loco", help="Output directory")
+    loco_parser.add_argument("--no-pairwise", action="store_true", help="Skip malicious+benign paired holdouts")
+
+    diagnostics_parser = subparsers.add_parser(
+        "run-capture-diagnostics",
+        help="Run capture-level feature shift diagnostics for WTMC evaluation.",
+    )
+    diagnostics_parser.add_argument("--config", required=True, help="YAML config describing the ML workflow")
+    diagnostics_parser.add_argument("--output-dir", default="artifacts/diagnostics/capture_shift")
+    diagnostics_parser.add_argument("--top-pairs", type=int, default=12)
+    diagnostics_parser.add_argument("--top-features", type=int, default=12)
+
+    predictability_parser = subparsers.add_parser(
+        "run-capture-predictability",
+        help="Measure whether flow features can predict source capture IDs.",
+    )
+    predictability_parser.add_argument("--config", required=True, help="YAML config describing the ML workflow")
+    predictability_parser.add_argument("--output-dir", default="artifacts/diagnostics/capture_predictability")
+    predictability_parser.add_argument("--test-size", type=float, default=0.25)
+    predictability_parser.add_argument("--n-estimators", type=int, default=200)
+    predictability_parser.add_argument("--n-jobs", type=int, default=-1)
+    predictability_parser.add_argument("--top-k-features", type=int, default=25)
+    predictability_parser.add_argument("--summarize-only", action="store_true", help="Only summarize existing outputs")
+
+    wtmc_figures_parser = subparsers.add_parser(
+        "export-wtmc-figures",
+        help="Export WTMC-ready capture-shift figures and tables.",
+    )
+    wtmc_figures_parser.add_argument(
+        "--diagnostics-dir",
+        default="artifacts/diagnostics/capture_shift",
+        help="Directory containing capture diagnostics outputs",
+    )
+    wtmc_figures_parser.add_argument(
+        "--loco-dir",
+        default="artifacts/ml_workflow/loco",
+        help="Directory containing LOCO evaluation outputs",
+    )
+    wtmc_figures_parser.add_argument("--output-dir", default="artifacts/wtmc_figures")
+    wtmc_figures_parser.add_argument("--top-pairs", type=int, default=12)
+
     multi_tier_parser = subparsers.add_parser(
         "run-multi-tier",
         help="Run the multi-tier scoring workflow with graph-based endpoint enrichment.",
@@ -243,6 +289,76 @@ def handle_run_ml_workflow(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_run_loco_evaluation(args: argparse.Namespace) -> int:
+    from tls_dataset.ml.loco import run_loco_evaluation
+
+    summary = run_loco_evaluation(
+        config_path=args.config,
+        output_dir=args.output_dir,
+        include_pairwise=not args.no_pairwise,
+    )
+    for key, value in summary.items():
+        print(f"{key}={value}")
+    return 0
+
+
+def handle_run_capture_diagnostics(args: argparse.Namespace) -> int:
+    from tls_dataset.ml.capture_diagnostics import run_capture_diagnostics
+
+    summary = run_capture_diagnostics(
+        config_path=args.config,
+        output_dir=args.output_dir,
+        top_pairs=args.top_pairs,
+        top_features=args.top_features,
+    )
+    for key, value in summary.items():
+        print(f"{key}={value}")
+    return 0
+
+
+def handle_run_capture_predictability(args: argparse.Namespace) -> int:
+    from tls_dataset.ml.capture_predictability import (
+        run_capture_predictability,
+        summarize_capture_predictability_outputs,
+    )
+
+    if args.summarize_only:
+        summary = summarize_capture_predictability_outputs(
+            output_dir=args.output_dir,
+            top_k_features=args.top_k_features,
+        )
+    else:
+        summary = run_capture_predictability(
+            config_path=args.config,
+            output_dir=args.output_dir,
+            test_size=args.test_size,
+            n_estimators=args.n_estimators,
+            n_jobs=args.n_jobs,
+            top_k_features=args.top_k_features,
+        )
+        summary["report"] = summarize_capture_predictability_outputs(
+            output_dir=args.output_dir,
+            top_k_features=args.top_k_features,
+        )
+    for key, value in summary.items():
+        print(f"{key}={value}")
+    return 0
+
+
+def handle_export_wtmc_figures(args: argparse.Namespace) -> int:
+    from tls_dataset.reporting.wtmc_figures import run_wtmc_figure_export
+
+    summary = run_wtmc_figure_export(
+        diagnostics_dir=args.diagnostics_dir,
+        loco_dir=args.loco_dir,
+        output_dir=args.output_dir,
+        top_pairs=args.top_pairs,
+    )
+    for key, value in summary.items():
+        print(f"{key}={value}")
+    return 0
+
+
 def handle_run_multi_tier(args: argparse.Namespace) -> int:
     from tls_dataset.detection.multitier import run_multitier_detection
 
@@ -284,6 +400,14 @@ def main(argv: list[str] | None = None) -> int:
         return handle_build_canonical_dataset(args)
     if args.command == "run-ml-workflow":
         return handle_run_ml_workflow(args)
+    if args.command == "run-loco-evaluation":
+        return handle_run_loco_evaluation(args)
+    if args.command == "run-capture-diagnostics":
+        return handle_run_capture_diagnostics(args)
+    if args.command == "run-capture-predictability":
+        return handle_run_capture_predictability(args)
+    if args.command == "export-wtmc-figures":
+        return handle_export_wtmc_figures(args)
     if args.command == "run-multi-tier":
         return handle_run_multi_tier(args)
     if args.command == "export-static-dashboard":

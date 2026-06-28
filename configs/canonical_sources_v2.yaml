@@ -1,0 +1,166 @@
+version: 2
+# Multi-capture canonical sources — EncFlow v2 (ACSAC 2026)
+# Benign: 1 lab capture + 4 CTU Normal captures (uncomment after phase2_benign_pipeline.sh)
+# Malicious: 1 original + 3 additional CTU botnet captures
+# Total capture_ids: 9 → StratifiedGroupKFold(n_splits=5) activates for both classes
+
+window_size_ms: 60000
+
+sources:
+  # ---- Benign: lab capture ----
+  - name: benign_lab_nfstream
+    input_csv: benign_process_csv/benign_nfstream.csv
+    source_dataset: hdbw_lab_benign
+    capture_id: benign_lab_primary
+    label: benign
+    attack_family: benign
+    attack_category: none
+    traffic_role: user_activity
+    feature_view: nfstream
+    encrypted_only: true
+    extra_labels:
+      environment: lab
+      collection_origin: thesis_workspace
+
+  # ---- Benign: CTU Normal captures (Phase 2 — uncomment after phase2_benign_pipeline.sh) ----
+  # Run: bash scripts/phase2_benign_pipeline.sh
+  # Same pipeline as malicious — label is assigned here in the YAML.
+  # Sizes: normal_20=269MB  normal_21=297MB  normal_7=398MB  normal_14=403MB
+  # Adds 4 new benign capture_ids → total benign capture_ids: 5
+
+  - name: ctu_normal_20_nfstream
+    input_csv: artifacts/runs/ctu_normal_20/ctu_normal_20_nfstream.csv
+    source_dataset: ctu_normal_20
+    capture_id: ctu_normal_20
+    label: benign
+    attack_family: benign
+    attack_category: none
+    traffic_role: user_activity
+    feature_view: nfstream
+    encrypted_only: true
+    quality_report_json: artifacts/runs/ctu_normal_20/ctu_normal_20_quality_report.json
+    provenance_json: artifacts/runs/ctu_normal_20/ctu_normal_20_provenance.json
+    extra_labels:
+      environment: public_dataset
+      collection_origin: ctu_normal_20
+
+  - name: ctu_normal_21_nfstream
+    input_csv: artifacts/runs/ctu_normal_21/ctu_normal_21_nfstream.csv
+    source_dataset: ctu_normal_21
+    capture_id: ctu_normal_21
+    label: benign
+    attack_family: benign
+    attack_category: none
+    traffic_role: user_activity
+    feature_view: nfstream
+    encrypted_only: true
+    quality_report_json: artifacts/runs/ctu_normal_21/ctu_normal_21_quality_report.json
+    provenance_json: artifacts/runs/ctu_normal_21/ctu_normal_21_provenance.json
+    extra_labels:
+      environment: public_dataset
+      collection_origin: ctu_normal_21
+
+  - name: ctu_normal_7_nfstream
+    input_csv: artifacts/runs/ctu_normal_7/ctu_normal_7_nfstream.csv
+    source_dataset: ctu_normal_7
+    capture_id: ctu_normal_7
+    label: benign
+    attack_family: benign
+    attack_category: none
+    traffic_role: user_activity
+    feature_view: nfstream
+    encrypted_only: true
+    quality_report_json: artifacts/runs/ctu_normal_7/ctu_normal_7_quality_report.json
+    provenance_json: artifacts/runs/ctu_normal_7/ctu_normal_7_provenance.json
+    extra_labels:
+      environment: public_dataset
+      collection_origin: ctu_normal_7
+
+  - name: ctu_normal_14_nfstream
+    input_csv: artifacts/runs/ctu_normal_14/ctu_normal_14_nfstream.csv
+    source_dataset: ctu_normal_14
+    capture_id: ctu_normal_14
+    label: benign
+    attack_family: benign
+    attack_category: none
+    traffic_role: user_activity
+    feature_view: nfstream
+    encrypted_only: true
+    quality_report_json: artifacts/runs/ctu_normal_14/ctu_normal_14_quality_report.json
+    provenance_json: artifacts/runs/ctu_normal_14/ctu_normal_14_provenance.json
+    extra_labels:
+      environment: public_dataset
+      collection_origin: ctu_normal_14
+
+  # ---- Malicious: original capture ----
+  - name: malicious_ctu_nfstream
+    input_csv: artifacts/runs/malicious_full_v2/malicious_full_v2_nfstream.csv
+    source_dataset: ctu_botnet_tls_filtered
+    capture_id: ctu_botnet_primary
+    label: malicious
+    attack_family: botnet
+    attack_category: c2_exfil
+    traffic_role: adversarial_activity
+    feature_view: nfstream
+    encrypted_only: true
+    quality_report_json: artifacts/runs/malicious_full_v2/malicious_full_v2_quality_report.json
+    provenance_json: artifacts/runs/malicious_full_v2/malicious_full_v2_provenance.json
+    extra_labels:
+      environment: public_dataset
+      collection_origin: ctu_botnet
+
+  # ---- Malicious: additional CTU captures (Phase 1) ----
+  # Included: 112-1 (720 TLS flows), 110-1 (583 TLS flows), 369-1 (9730 TLS flows)
+  # Excluded: 368-1 (only 6 TLS flows — HTTP/ICMPv6 botnet), 52 (only 9 TLS flows — 2011 IRC botnet)
+  # Total malicious capture_ids: 4 (primary + these 3) → StratifiedGroupKFold activates for 3-fold CV
+
+  - name: ctu_botnet_112_1_nfstream
+    input_csv: artifacts/runs/ctu_botnet_112_1/ctu_botnet_112_1_nfstream.csv
+    source_dataset: ctu_botnet_112_1
+    capture_id: ctu_botnet_112_1
+    label: malicious
+    attack_family: botnet_ramnit
+    attack_category: c2_exfil
+    traffic_role: adversarial_activity
+    feature_view: nfstream
+    encrypted_only: true
+    quality_report_json: artifacts/runs/ctu_botnet_112_1/ctu_botnet_112_1_quality_report.json
+    provenance_json: artifacts/runs/ctu_botnet_112_1/ctu_botnet_112_1_provenance.json
+    extra_labels:
+      environment: public_dataset
+      collection_origin: ctu_botnet_112_1
+
+  - name: ctu_botnet_110_1_nfstream
+    input_csv: artifacts/runs/ctu_botnet_110_1/ctu_botnet_110_1_nfstream.csv
+    source_dataset: ctu_botnet_110_1
+    capture_id: ctu_botnet_110_1
+    label: malicious
+    attack_family: botnet_ramnit
+    attack_category: c2_exfil
+    traffic_role: adversarial_activity
+    feature_view: nfstream
+    encrypted_only: true
+    quality_report_json: artifacts/runs/ctu_botnet_110_1/ctu_botnet_110_1_quality_report.json
+    provenance_json: artifacts/runs/ctu_botnet_110_1/ctu_botnet_110_1_provenance.json
+    extra_labels:
+      environment: public_dataset
+      collection_origin: ctu_botnet_110_1
+
+  # ctu_botnet_368_1 excluded: only 6 TLS flows (HTTP/ICMPv6 botnet, not TLS-based)
+  # ctu_botnet_52 excluded: only 9 TLS flows (2011 IRC botnet, negligible TLS content)
+
+  - name: ctu_botnet_369_1_nfstream
+    input_csv: artifacts/runs/ctu_botnet_369_1/ctu_botnet_369_1_nfstream.csv
+    source_dataset: ctu_botnet_369_1
+    capture_id: ctu_botnet_369_1
+    label: malicious
+    attack_family: botnet_https_2019
+    attack_category: c2_exfil
+    traffic_role: adversarial_activity
+    feature_view: nfstream
+    encrypted_only: true
+    quality_report_json: artifacts/runs/ctu_botnet_369_1/ctu_botnet_369_1_quality_report.json
+    provenance_json: artifacts/runs/ctu_botnet_369_1/ctu_botnet_369_1_provenance.json
+    extra_labels:
+      environment: public_dataset
+      collection_origin: ctu_botnet_369_1

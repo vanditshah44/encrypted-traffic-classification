@@ -41,11 +41,26 @@ IDENTIFIER_COLUMNS = (
 
 
 def detect_protocol_masks(df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
-    ssl_indicator_cols = [c for c in df.columns if c in ("version", "cipher", "server_name", "ja3", "ja3s")]
-    if ssl_indicator_cols:
-        tls_mask = df[ssl_indicator_cols].notna().any(axis=1)
+    # Tier 1: Zeek ssl/tls columns (present when Zeek extracted TLS metadata)
+    zeek_ssl_cols = [c for c in df.columns if c in ("version", "cipher", "server_name", "ja3", "ja3s")]
+    if zeek_ssl_cols:
+        tls_mask = df[zeek_ssl_cols].notna().any(axis=1)
     else:
-        tls_mask = pd.Series(False, index=df.index)
+        # Tier 2: NFStream's own TLS DPI columns (non-null when NFStream identified TLS)
+        nfstream_tls_cols = [
+            c for c in df.columns
+            if c in ("client_fingerprint", "server_fingerprint", "requested_server_name")
+        ]
+        if nfstream_tls_cols:
+            tls_mask = df[nfstream_tls_cols].notna().any(axis=1)
+        else:
+            tls_mask = pd.Series(False, index=df.index)
+
+        # Tier 3: PCAP was already tshark-filtered to `tls or quic`, so if neither
+        # Zeek nor NFStream flagged any flow as TLS, treat all flows as encrypted.
+        if not tls_mask.any():
+            print("[WARN] No TLS indicator columns found — treating all flows as encrypted (tshark-filtered PCAP)")
+            tls_mask = pd.Series(True, index=df.index)
 
     likely_quic_cols = [
         c for c in df.columns if any(token in c.lower() for token in ("quic", "cid", "scid", "dcid", "h3", "http3"))

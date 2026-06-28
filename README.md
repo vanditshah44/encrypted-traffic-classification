@@ -1,20 +1,21 @@
-# Attack Detection in Encrypted TLS 1.3 / QUIC Traffic
+# EncFlow — Attack Detection in Encrypted TLS 1.3 / QUIC Traffic
 
-Production-grade implementation of a privacy-preserving encrypted traffic analytics and scoring platform for malicious activity detection in TLS 1.3 and QUIC environments.
+Privacy-preserving encrypted-traffic analytics and scoring platform for malicious-activity detection in TLS 1.3 and QUIC environments — **without decrypting any payload**.
 
-This repository operationalizes the thesis work into a structured software project with reproducible data pipelines, supervised ML workflows, multi-tier detection, graph enrichment, and a backend scoring platform.
+This repository operationalizes an M.Sc. thesis into a structured, tested software project with reproducible data pipelines, supervised ML workflows, capture-aware evaluation, multi-tier detection, graph enrichment, and a backend scoring platform. The thesis PDF is preserved in `Thesis/` as the academic reference.
 
 ## Overview
 
-The project is built around one core idea: detect malicious behavior in encrypted traffic without decrypting payloads.
+The project is built around one core idea: detect malicious behavior in encrypted traffic without decrypting payloads, using only flow-level metadata (timing, packet-size distributions, directional asymmetry, and burst statistics).
 
 It does that by combining:
 
 - `Zeek` for protocol-aware TLS 1.3 and QUIC evidence
-- `NFStream` for bidirectional flow statistics
+- `NFStream` for bidirectional statistical flow features
 - a canonical labeled dataset for training and scoring
-- supervised models including `GaussianNB`, `RandomForest`, and `GradientBoosting`
-- staged detection logic with graph-based endpoint enrichment
+- supervised models: `GaussianNB`, `RandomForest`, `GradientBoosting`, and `XGBoost`
+- **capture-aware evaluation** (held-out captures + StratifiedGroupKFold) to prevent session memorization
+- staged multi-tier detection with graph-based endpoint enrichment
 - a backend platform for batch PCAP scoring and artifact tracking
 
 ## Core Capabilities
@@ -37,6 +38,27 @@ The production feature-extraction stack in this repository is:
 `CICFlowMeter` is treated as legacy thesis-era context only and is not part of the forward implementation path for this codebase.
 
 The formal architecture decision is recorded in [ADR 0001](docs/adr/0001-feature-extraction-stack.md).
+
+## Results
+
+Evaluation uses the v2 canonical dataset: **68,917 labeled TLS 1.3 / QUIC flows** drawn from **9 independent network captures** (4 malicious, 5 benign). Two full captures — `ctu_botnet_369_1` (2019 HTTPS botnet) and `ctu_normal_21` (Kali HTTPS) — are held out and never seen during training or threshold selection. Cross-validation uses `StratifiedGroupKFold` keyed on `capture_id`, so no capture appears in both train and validation folds.
+
+Held-out capture test set (12,871 flows), optimized threshold:
+
+| Model | F1 | ROC-AUC | Precision | Recall |
+|---|---|---|---|---|
+| RandomForest | **0.880** | 0.961 | 0.990 | 0.793 |
+| GradientBoosting | 0.852 | 0.968 | 0.979 | 0.754 |
+| XGBoost | 0.795 | 0.980 | 0.996 | 0.661 |
+| GaussianNB | 0.832 | 0.491 | 0.761 | 0.917 |
+
+Key findings:
+
+- **Flow statistics carry the signal.** Removing NFStream DPI features drops RandomForest F1 by only **0.011** (pure-flow baseline F1 0.869), confirming detection does not depend on application-layer inspection — consistent with no-decryption / GDPR constraints.
+- **Multi-tier consensus suppresses false positives.** The Gaussian NB front door is deliberately recall-heavy; the RF + GB + XGB consensus layer reaches **Tier-2 precision 0.996, F1 0.830** on held-out captures (28 false positives across 3,141 benign flows).
+- **Honest limitations.** Malicious Zeek output is incomplete (`conn` only, no `ssl`/`tls`), so labels are NFStream-grounded; QUIC coverage is ~2%; and per-capture LOCO performance varies widely — the framework is designed to expose where encrypted-traffic detection works and where it does not.
+
+Numbers are reproduced from `artifacts/ml_workflow/v2_full/model_comparison.csv`, `artifacts/ml_workflow/v2_pure_flow/model_comparison.csv`, and `artifacts/multi_tier/v2_latest/workflow_summary.json`.
 
 ## Repository Layout
 
@@ -112,30 +134,39 @@ PYTHONPATH=src .venv/bin/python -m tls_dataset run-malicious-pipeline \
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m tls_dataset build-canonical-dataset \
-  --config configs/canonical_sources.yaml \
-  --output-csv artifacts/canonical/canonical_labeled_flows.csv \
-  --output-summary-json artifacts/canonical/canonical_labeled_flows_summary.json
+  --config configs/canonical_sources_v2.yaml \
+  --output-csv artifacts/canonical_v2/canonical_labeled_flows.csv \
+  --output-summary-json artifacts/canonical_v2/canonical_labeled_flows_summary.json
 ```
 
 ### 4. Train and evaluate the ML workflow
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m tls_dataset run-ml-workflow \
-  --config configs/ml_workflow.yaml
+  --config configs/ml_workflow_v2.yaml
 ```
 
 ### 5. Run multi-tier scoring and graph enrichment
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m tls_dataset run-multi-tier \
-  --config configs/multi_tier_workflow.yaml
+  --config configs/multi_tier_workflow_v2.yaml
 ```
 
-### 6. Export the static analytical site bundle
+### 6. Reproduce the full evaluation suite
+
+The complete v2 experiment — full-feature and pure-flow training, feature ablation, artifact-resistant LOCO, and multi-tier scoring — is orchestrated by a single script:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m tls_dataset export-static-dashboard \
-  --output-dir showcase
+bash scripts/run_v2_experiment.sh
+```
+
+Additional standalone evaluations:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m tls_dataset run-loco-evaluation        --config configs/ml_workflow_v2.yaml
+PYTHONPATH=src .venv/bin/python -m tls_dataset run-capture-diagnostics    --config configs/ml_workflow_v2.yaml
+PYTHONPATH=src .venv/bin/python -m tls_dataset run-capture-predictability --config configs/ml_workflow_v2.yaml
 ```
 
 ## Backend Scoring Platform

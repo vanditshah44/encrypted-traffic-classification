@@ -1,0 +1,59 @@
+version: 2
+
+# EncFlow v2 — pure flow statistics only (no application-layer DPI features)
+# Excludes application_is_guessed and application_confidence to show that
+# the method works on raw traffic statistics without relying on NFStream DPI.
+# Results here are the honest baseline reported in the paper body.
+
+dataset_csv: artifacts/canonical_v2/canonical_labeled_flows.csv
+output_dir: artifacts/ml_workflow/v2_pure_flow
+target_column: label_id
+label_column: label
+record_id_column: record_id
+positive_label: 1
+test_size: 0.2
+random_state: 42
+cv_folds: 3
+threshold_metric: youden_j
+min_threshold: 0.3
+top_k_feature_importance: 20
+include_xgboost: true
+capture_cv: true
+
+test_capture_ids:
+  - ctu_botnet_369_1
+  - ctu_normal_21
+
+extra_excluded_columns:
+  - collection_origin
+  - environment
+  # Application-layer DPI features — excluded to show pure traffic-stat performance
+  - application_is_guessed
+  - application_confidence
+
+permutation_importance:
+  n_repeats: 5
+  scoring: roc_auc
+  max_samples: 4000
+
+models:
+  gaussian_nb: {}
+  random_forest:
+    n_estimators: 300
+    random_state: 42
+    n_jobs: -1
+    class_weight: balanced_subsample
+  gradient_boosting:
+    n_estimators: 200
+    learning_rate: 0.05
+    max_depth: 3
+    random_state: 42
+  xgboost:
+    n_estimators: 300
+    learning_rate: 0.05
+    max_depth: 6
+    random_state: 42
+    n_jobs: -1
+    eval_metric: logloss
+    verbosity: 0
+    scale_pos_weight: 1

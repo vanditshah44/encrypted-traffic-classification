@@ -36,6 +36,7 @@ from sklearn.metrics import (
     roc_curve,
 )
 from sklearn.model_selection import (
+    StratifiedGroupKFold,
     StratifiedKFold,
     StratifiedShuffleSplit,
     cross_val_predict,
@@ -44,6 +45,12 @@ from sklearn.model_selection import (
 )
 from sklearn.naive_bayes import GaussianNB
 from sklearn.pipeline import Pipeline
+
+try:
+    from xgboost import XGBClassifier
+    HAS_XGBOOST = True
+except ImportError:
+    HAS_XGBOOST = False
 
 from tls_dataset.pipeline.canonical import BASE_METADATA_COLUMNS
 
@@ -92,6 +99,10 @@ class WorkflowConfig:
     permutation_scoring: str
     permutation_max_samples: int
     model_params: dict[str, dict[str, Any]]
+    include_xgboost: bool
+    capture_cv: bool
+    test_capture_ids: tuple[str, ...]
+    min_threshold: float
 
 
 @dataclass(frozen=True)
@@ -130,12 +141,16 @@ def load_workflow_config(config_path: str | Path) -> WorkflowConfig:
         permutation_scoring=str(permutation.get("scoring", "roc_auc")),
         permutation_max_samples=int(permutation.get("max_samples", 4000)),
         model_params={str(key): dict(value or {}) for key, value in models.items()},
+        include_xgboost=bool(payload.get("include_xgboost", False)),
+        capture_cv=bool(payload.get("capture_cv", False)),
+        test_capture_ids=tuple(str(v) for v in payload.get("test_capture_ids", [])),
+        min_threshold=float(payload.get("min_threshold", 0.3)),
     )
 
 
 def build_model_specs(config: WorkflowConfig) -> list[ModelSpec]:
     params = config.model_params
-    return [
+    specs = [
         ModelSpec(
             name="gaussian_nb",
             estimator=GaussianNB(**params.get("gaussian_nb", {})),
@@ -149,6 +164,46 @@ def build_model_specs(config: WorkflowConfig) -> list[ModelSpec]:
             estimator=GradientBoostingClassifier(**params.get("gradient_boosting", {})),
         ),
     ]
+    if config.include_xgboost:
+        if not HAS_XGBOOST:
+            print("WARNING: include_xgboost=true but xgboost is not installed. Skipping. Run: pip install xgboost")
+        else:
+            xgb_params = dict(params.get("xgboost", {}))
+            xgb_params.setdefault("random_state", 42)
+            xgb_params.setdefault("n_estimators", 300)
+            xgb_params.setdefault("learning_rate", 0.05)
+            xgb_params.setdefault("max_depth", 6)
+            xgb_params.setdefault("n_jobs", -1)
+            xgb_params.setdefault("eval_metric", "logloss")
+            xgb_params.setdefault("verbosity", 0)
+            specs.append(ModelSpec(
+                name="xgboost",
+                estimator=XGBClassifier(**xgb_params),
+            ))
+    return specs
+
+
+def build_capture_aware_cv(
+    *,
+    groups: pd.Series | None,
+    y: pd.Series | None = None,
+    n_splits: int,
+    random_state: int,
+) -> StratifiedGroupKFold | StratifiedKFold:
+    """Return StratifiedGroupKFold when total capture groups >= n_splits, else StratifiedKFold."""
+    if groups is not None and groups.nunique() >= n_splits:
+        n_groups = groups.nunique()
+        print(f"INFO: capture_cv enabled — using StratifiedGroupKFold(n_splits={n_splits}) with {n_groups} capture groups")
+        if y is not None:
+            per_class = {label: groups[y == label].nunique() for label in y.unique()}
+            thin = {k: v for k, v in per_class.items() if v < n_splits}
+            if thin:
+                print(f"  WARN: some classes have fewer capture groups than n_splits={n_splits}: {thin}")
+                print(f"  Some test folds may lack samples from those classes — consider reducing cv_folds.")
+        return StratifiedGroupKFold(n_splits=n_splits)
+    if groups is not None:
+        print(f"INFO: capture_cv requested but only {groups.nunique()} capture group(s) for {n_splits} folds — falling back to StratifiedKFold")
+    return StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
 
 
 def build_label_lookup(df: pd.DataFrame, *, target_column: str, label_column: str) -> dict[int, str]:
@@ -230,14 +285,17 @@ def compute_binary_metrics(
 ) -> dict[str, float]:
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
     specificity = float(tn / (tn + fp)) if (tn + fp) else 0.0
+    recall = float(recall_score(y_true, y_pred, zero_division=0))
+    youden_j = recall + specificity - 1.0
     return {
         "threshold": float(threshold),
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "precision": float(precision_score(y_true, y_pred, zero_division=0)),
-        "recall": float(recall_score(y_true, y_pred, zero_division=0)),
+        "recall": recall,
         "f1": float(f1_score(y_true, y_pred, zero_division=0)),
         "specificity": specificity,
         "balanced_accuracy": float(balanced_accuracy_score(y_true, y_pred)),
+        "youden_j": youden_j,
         "roc_auc": float(roc_auc_score(y_true, y_score)),
         "average_precision": float(average_precision_score(y_true, y_score)),
         "tp": int(tp),
@@ -252,8 +310,12 @@ def evaluate_thresholds(
     y_score: np.ndarray,
     *,
     thresholds: np.ndarray | None = None,
+    min_threshold: float = 0.0,
 ) -> pd.DataFrame:
-    threshold_values = thresholds if thresholds is not None else np.linspace(0.0, 1.0, 201)
+    raw_values = thresholds if thresholds is not None else np.linspace(0.0, 1.0, 201)
+    threshold_values = raw_values[raw_values >= min_threshold]
+    if len(threshold_values) == 0:
+        threshold_values = np.array([min_threshold])
     rows: list[dict[str, float | int]] = []
     for threshold in threshold_values:
         y_pred = (y_score >= threshold).astype(int)
@@ -263,16 +325,33 @@ def evaluate_thresholds(
 
 
 def select_best_threshold(threshold_frame: pd.DataFrame, metric: str) -> dict[str, float]:
-    sort_columns = [metric, "precision", "balanced_accuracy", "recall"]
+    # youden_j is most robust: always 0 at threshold=0 (trivial classifier), peaks at optimal point
+    sort_metric = metric if metric in threshold_frame.columns else "youden_j"
+    sort_columns = [sort_metric, "precision", "balanced_accuracy", "recall"]
     ranked = threshold_frame.sort_values(sort_columns, ascending=[False, False, False, False], kind="stable")
     best_row = ranked.iloc[0]
+    chosen = float(best_row["threshold"])
+
+    # Guard: if optimizer converges to a boundary (≥0.95 or = min value), the CV folds were
+    # too imbalanced for reliable threshold selection — fall back to 0.5.
+    max_in_sweep = float(threshold_frame["threshold"].max())
+    min_in_sweep = float(threshold_frame["threshold"].min())
+    if chosen >= max_in_sweep - 0.01 or chosen <= min_in_sweep + 0.01:
+        midpoint_rows = threshold_frame[threshold_frame["threshold"].between(0.49, 0.51)]
+        if not midpoint_rows.empty:
+            print(f"WARN: threshold optimizer converged to boundary ({chosen:.3f}) — "
+                  f"CV folds likely too imbalanced. Falling back to threshold=0.5.")
+            best_row = midpoint_rows.sort_values(sort_metric, ascending=False).iloc[0]
+            chosen = 0.5
+
     return {
-        "threshold": float(best_row["threshold"]),
-        "metric": metric,
-        "metric_value": float(best_row[metric]),
+        "threshold": chosen,
+        "metric": sort_metric,
+        "metric_value": float(best_row[sort_metric]),
         "precision": float(best_row["precision"]),
         "recall": float(best_row["recall"]),
         "f1": float(best_row["f1"]),
+        "youden_j": float(best_row["youden_j"]),
         "balanced_accuracy": float(best_row["balanced_accuracy"]),
     }
 
@@ -560,14 +639,28 @@ def run_ml_workflow(
     ]
     record_frame = df[record_columns].copy()
 
-    X_train, X_test, y_train, y_test, records_train, records_test = train_test_split(
-        X,
-        y,
-        record_frame,
-        test_size=config.test_size,
-        random_state=config.random_state,
-        stratify=y,
-    )
+    if config.test_capture_ids and "capture_id" in df.columns:
+        test_mask = df["capture_id"].isin(config.test_capture_ids).values
+        if not test_mask.any():
+            raise RuntimeError(f"test_capture_ids {config.test_capture_ids!r} matched no rows — check capture_id values in the dataset")
+        train_mask = ~test_mask
+        X_train = X[train_mask].reset_index(drop=True)
+        X_test  = X[test_mask].reset_index(drop=True)
+        y_train = y[train_mask].reset_index(drop=True)
+        y_test  = y[test_mask].reset_index(drop=True)
+        records_train = record_frame[train_mask].reset_index(drop=True)
+        records_test  = record_frame[test_mask].reset_index(drop=True)
+        held_out = dict(df[test_mask].groupby("capture_id").size())
+        print(f"INFO: capture-aware test split — held-out captures: {held_out}")
+    else:
+        X_train, X_test, y_train, y_test, records_train, records_test = train_test_split(
+            X,
+            y,
+            record_frame,
+            test_size=config.test_size,
+            random_state=config.random_state,
+            stratify=y,
+        )
 
     constant_columns = [column for column in X_train.columns if X_train[column].nunique(dropna=False) <= 1]
     all_missing_columns = [column for column in X_train.columns if X_train[column].isna().all()]
@@ -595,7 +688,17 @@ def run_ml_workflow(
     )
     split_frame.to_csv(output_dir / "dataset_split_manifest.csv", index=False)
 
-    cv = StratifiedKFold(n_splits=config.cv_folds, shuffle=True, random_state=config.random_state)
+    # Build capture-aware CV if enabled and capture_id is available
+    train_groups: pd.Series | None = None
+    if config.capture_cv and "capture_id" in records_train.columns:
+        train_groups = records_train["capture_id"].reset_index(drop=True)
+
+    cv = build_capture_aware_cv(
+        groups=train_groups,
+        y=y_train.reset_index(drop=True) if train_groups is not None else None,
+        n_splits=config.cv_folds,
+        random_state=config.random_state,
+    )
     scoring = build_scoring()
     model_results: dict[str, dict[str, Any]] = {}
 
@@ -604,15 +707,18 @@ def run_ml_workflow(
         model_dir.mkdir(parents=True, exist_ok=True)
 
         pipeline = build_model_pipeline(model_spec.estimator)
-        cv_scores = cross_validate(
-            pipeline,
-            X_train,
-            y_train,
+        cv_kwargs: dict[str, Any] = dict(
+            estimator=pipeline,
+            X=X_train,
+            y=y_train,
             cv=cv,
             scoring=scoring,
             return_train_score=False,
             n_jobs=1,
         )
+        if train_groups is not None and isinstance(cv, StratifiedGroupKFold):
+            cv_kwargs["groups"] = train_groups
+        cv_scores = cross_validate(**cv_kwargs)
         cv_frame = pd.DataFrame(cv_scores)
         cv_frame.rename(columns=lambda name: name.replace("test_", ""), inplace=True)
         cv_frame.to_csv(model_dir / "cv_scores.csv", index=False)
@@ -627,15 +733,18 @@ def run_ml_workflow(
         }
         save_json(cv_summary, model_dir / "cv_summary.json")
 
-        cv_probabilities = cross_val_predict(
-            pipeline,
-            X_train,
-            y_train,
+        cvp_kwargs: dict[str, Any] = dict(
+            estimator=pipeline,
+            X=X_train,
+            y=y_train,
             cv=cv,
             method="predict_proba",
             n_jobs=1,
-        )[:, config.positive_label]
-        threshold_frame = evaluate_thresholds(y_train, cv_probabilities)
+        )
+        if train_groups is not None and isinstance(cv, StratifiedGroupKFold):
+            cvp_kwargs["groups"] = train_groups
+        cv_probabilities = cross_val_predict(**cvp_kwargs)[:, config.positive_label]
+        threshold_frame = evaluate_thresholds(y_train, cv_probabilities, min_threshold=config.min_threshold)
         threshold_frame.to_csv(model_dir / "threshold_sweep.csv", index=False)
         threshold_summary = select_best_threshold(threshold_frame, config.threshold_metric)
         save_json(threshold_summary, model_dir / "threshold_summary.json")
@@ -823,6 +932,8 @@ def run_ml_workflow(
     comparison_frame.to_csv(output_dir / "model_comparison.csv", index=False)
     save_comparison_plots(model_results, output_dir=output_dir)
 
+    cv_type = type(cv).__name__
+    capture_groups_used = train_groups is not None and isinstance(cv, StratifiedGroupKFold)
     workflow_summary = {
         "config_path": str(Path(config_path).expanduser().resolve()),
         "dataset_csv": str(dataset_path),
@@ -833,6 +944,11 @@ def run_ml_workflow(
         "test_rows": int(len(X_test)),
         "feature_count": int(len(X_train.columns)),
         "label_lookup": label_lookup,
+        "cv_type": cv_type,
+        "capture_groups_used": capture_groups_used,
+        "capture_groups_count": int(train_groups.nunique()) if capture_groups_used else 1,
+        "test_capture_ids": list(config.test_capture_ids),
+        "test_split_mode": "capture_holdout" if config.test_capture_ids else "random_stratified",
         "warnings": analyze_dataset_risks(df, label_column=config.label_column),
         "quality_status_counts": df["quality_status"].fillna("unknown").astype(str).value_counts().to_dict()
         if "quality_status" in df.columns

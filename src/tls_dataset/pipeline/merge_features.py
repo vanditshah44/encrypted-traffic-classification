@@ -145,13 +145,13 @@ def merge_nfstream_with_zeek(
 
     conn_expanded = pd.concat([conn_a, conn_b], ignore_index=True).dropna(subset=["proto_num","ts"])
 
-    # Ensure types for join
-    conn_expanded["src_port"] = pd.to_numeric(conn_expanded["src_port"], errors="coerce")
-    conn_expanded["dst_port"] = pd.to_numeric(conn_expanded["dst_port"], errors="coerce")
-    conn_expanded["proto_num"] = pd.to_numeric(conn_expanded["proto_num"], errors="coerce")
-
-    nf["src_port"] = pd.to_numeric(nf["src_port"], errors="coerce")
-    nf["dst_port"] = pd.to_numeric(nf["dst_port"], errors="coerce")
+    # Ensure types for join — merge_asof requires identical dtypes for all `by` keys.
+    # proto_num is int64 in NFStream (no NaN) but float64 in conn (np.nan for unknown
+    # protocols), so we normalise both sides to float64 before merging.
+    for col in ("src_port", "dst_port", "proto_num"):
+        conn_expanded[col] = pd.to_numeric(conn_expanded[col], errors="coerce").astype("float64")
+    for col in ("src_port", "dst_port", "proto_num"):
+        nf[col] = pd.to_numeric(nf[col], errors="coerce").astype("float64")
 
     # Sort for merge_asof
     nf_sorted = nf.sort_values("ts")
